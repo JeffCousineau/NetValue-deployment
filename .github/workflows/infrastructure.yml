@@ -1,0 +1,62 @@
+name: Infrastructure
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Review a plan or apply it
+        type: choice
+        options: [plan, apply]
+        default: plan
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: netvalue-production
+  cancel-in-progress: false
+jobs:
+  terraform:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: 'true'
+      ARM_USE_AZUREAD: 'true'
+      TF_VAR_free_offer_verified: ${{ vars.FREE_OFFER_VERIFIED }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TF_STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configuration
+        run: |
+          test -n "$ARM_CLIENT_ID"
+          test -n "$TF_STATE_ACCOUNT"
+          test "$ARM_TENANT_ID" = 'e099407c-b3b3-45aa-868e-cc901f513dc5'
+          test "$ARM_SUBSCRIPTION_ID" = '0bc9dd71-16c4-428e-8160-8a90c7c892f5'
+          test "$TF_VAR_free_offer_verified" = 'true'
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.5
+      - name: Initialize private Blob backend
+        run: |
+          terraform init -backend-config='resource_group_name=rg-netvalue-state' -backend-config="storage_account_name=$TF_STATE_ACCOUNT" -backend-config='container_name=tfstate' -backend-config='key=netvalue.terraform.tfstate' -backend-config='use_azuread_auth=true' -backend-config='use_oidc=true'
+      - run: terraform fmt -check
+      - run: terraform validate
+      - run: terraform plan -out=reviewed.tfplan
+      - name: Apply the generated plan
+        if: inputs.operation == 'apply'
+        run: terraform apply reviewed.tfplan
+      - name: Show installation details
+        if: inputs.operation == 'apply'
+        run: terraform output
