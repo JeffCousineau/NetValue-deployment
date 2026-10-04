@@ -52,7 +52,9 @@ Add environment variables from the bootstrap output:
 
 Add **ENTRA_CLIENT_SECRET** as a production environment secret: the secret VALUE from the existing NetValue sign-in app registration (`209f8009-5376-440d-8d26-f7316be55321`). Enter it directly in GitHub; do not paste it into chat, files, or command history. GitHub injects it into the App Service configuration, not Terraform variables. It can still appear in private Terraform state on provider refresh.
 
-The deployment app's federated credential is bound to `repo:JeffCousineau/NetValue-deployment:environment:production`, issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
+Bootstrap creates or updates the production federated credential, so rerunning it repairs the previous name-only subject. This repository uses GitHub's [immutable OIDC subject format](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims), including owner ID `8643172` and repository ID `1403790853`. Update the scripts if recreating or transferring this repository changes its subject.
+
+The deployment app's federated credential is bound to `repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production`, issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
 
 ## 3. Review and create application infrastructure
 

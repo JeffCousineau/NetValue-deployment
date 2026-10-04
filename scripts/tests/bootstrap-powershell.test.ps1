@@ -5,6 +5,8 @@ $global:NetValueTestNativeJsonRead = $false
 $global:NetValueTestCredentialFile = $null
 $global:NetValueTestProviderCalled = $false
 $global:NetValueTestContainerAttempts = 0
+$global:NetValueTestExistingCredential = $false
+$global:NetValueTestCredentialOperation = $null
 function global:az {
     $global:LASTEXITCODE = 0
     if ($args | Where-Object { $_ -match '[()]' }) { throw 'Command-shell metacharacters were passed to az.cmd' }
@@ -32,12 +34,20 @@ function global:az {
                 return (ConvertTo-Json -InputObject @(@{ displayName = $args[$nameIndex + 1]; appId = '00000000-0000-0000-0000-000000000003' }) -Compress)
             }
             if ($args[2] -eq 'federated-credential') {
-                if ($args[3] -eq 'list') { return '[]' }
+                if ($args[3] -eq 'list') {
+                    if ($global:NetValueTestExistingCredential) { return '[{"name":"github-production","id":"existing-credential","subject":"repo:JeffCousineau/NetValue-deployment:environment:production"}]' }
+                    return '[]'
+                }
+                $global:NetValueTestCredentialOperation = $args[3]
+                if ($args[3] -eq 'update') {
+                    $idIndex = [Array]::IndexOf($args, '--federated-credential-id')
+                    if ($idIndex -lt 0 -or $args[$idIndex + 1] -ne 'existing-credential') { throw 'Wrong credential was updated' }
+                }
                 $parameterIndex = [Array]::IndexOf($args, '--parameters')
                 $global:NetValueTestCredentialFile = $args[$parameterIndex + 1].Substring(1)
                 if (![IO.Path]::IsPathRooted($global:NetValueTestCredentialFile) -or !(Test-Path -LiteralPath $global:NetValueTestCredentialFile)) { throw 'Native JSON file path is unreadable' }
                 $credential = Get-Content -LiteralPath $global:NetValueTestCredentialFile -Raw | ConvertFrom-Json
-                if ($credential.subject -ne 'repo:JeffCousineau/NetValue-deployment:environment:production' -or $credential.audiences[0] -ne 'api://AzureADTokenExchange') { throw 'Invalid federated credential JSON' }
+                if ($credential.subject -ne 'repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production' -or $credential.audiences[0] -ne 'api://AzureADTokenExchange') { throw 'Invalid federated credential JSON' }
                 $global:NetValueTestNativeJsonRead = $true
                 return
             }
@@ -53,6 +63,12 @@ try {
     if (!$global:NetValueTestNativeJsonRead -or $global:NetValueTestContainerAttempts -ne 2) { throw 'Native JSON handling or permission retry failed' }
     if (Test-Path -LiteralPath $global:NetValueTestCredentialFile) { throw 'Temporary JSON file was not cleaned up' }
     if ($output -notcontains 'AZURE_CLIENT_ID=00000000-0000-0000-0000-000000000003') { throw 'Final configuration missing or contains CRLF' }
+    if ($global:NetValueTestCredentialOperation -ne 'create') { throw 'Missing credential was not created' }
+    $global:NetValueTestExistingCredential = $true
+    $global:NetValueTestNativeJsonRead = $false
+    & $bootstrap | Out-Null
+    if (!$global:NetValueTestNativeJsonRead -or $global:NetValueTestCredentialOperation -ne 'update') { throw 'Existing legacy subject was not repaired' }
+    if (Test-Path -LiteralPath $global:NetValueTestCredentialFile) { throw 'Update temporary JSON file was not cleaned up' }
     $global:NetValueTestMockTenant = '00000000-0000-0000-0000-000000000001'
     $global:NetValueTestProviderCalled = $false
     $rejected = $false

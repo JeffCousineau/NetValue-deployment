@@ -66,20 +66,25 @@ if (!$principalId) {
 }
 $federatedCredentials = @(Invoke-NetValueAzure -Arguments @('ad', 'app', 'federated-credential', 'list', '--id', $clientId, '--output', 'json') | ConvertFrom-Json | Where-Object { $_.name -eq 'github-production' })
 $credentialCount = $federatedCredentials.Count
-if ($credentialCount -eq 0) {
-    # PowerShell and az use the same native filesystem path; no Bash /tmp translation.
-    $credentialFile = [IO.Path]::GetTempFileName()
-    try {
-        $credential = @{
-            name = 'github-production'
-            issuer = 'https://token.actions.githubusercontent.com'
-            subject = 'repo:JeffCousineau/NetValue-deployment:environment:production'
-            audiences = @('api://AzureADTokenExchange')
-        } | ConvertTo-Json -Compress
-        [IO.File]::WriteAllText($credentialFile, $credential, [Text.UTF8Encoding]::new($false))
+if ($credentialCount -gt 1) { throw 'Duplicate production federated credentials; resolve them before continuing.' }
+# PowerShell and az use the same native filesystem path; no Bash /tmp translation.
+$credentialFile = [IO.Path]::GetTempFileName()
+try {
+    $credential = @{
+        name = 'github-production'
+        issuer = 'https://token.actions.githubusercontent.com'
+        subject = 'repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production'
+        audiences = @('api://AzureADTokenExchange')
+    }
+    if ($credentialCount -eq 1) { $credential.Remove('name') }
+    $credential = $credential | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($credentialFile, $credential, [Text.UTF8Encoding]::new($false))
+    if ($credentialCount -eq 0) {
         Invoke-NetValueAzure -Arguments @('ad', 'app', 'federated-credential', 'create', '--id', $clientId, '--parameters', "@$credentialFile", '--output', 'none') | Out-Null
-    } finally { Remove-Item -LiteralPath $credentialFile -Force -ErrorAction SilentlyContinue }
-}
+    } else {
+        Invoke-NetValueAzure -Arguments @('ad', 'app', 'federated-credential', 'update', '--id', $clientId, '--federated-credential-id', $federatedCredentials[0].id, '--parameters', "@$credentialFile", '--output', 'none') | Out-Null
+    }
+} finally { Remove-Item -LiteralPath $credentialFile -Force -ErrorAction SilentlyContinue }
 Write-Output 'Ensuring deployment permissions...'
 Invoke-NetValueAzure -Arguments @('role', 'assignment', 'create', '--assignee-object-id', $principalId, '--assignee-principal-type', 'ServicePrincipal', '--role', 'Contributor', '--scope', "/subscriptions/$subscriptionId/resourceGroups/rg-netvalue-free", '--output', 'none') | Out-Null
 Invoke-NetValueAzure -Arguments @('role', 'assignment', 'create', '--assignee-object-id', $principalId, '--assignee-principal-type', 'ServicePrincipal', '--role', 'Storage Blob Data Contributor', '--scope', "$stateId/blobServices/default/containers/tfstate", '--output', 'none') | Out-Null
