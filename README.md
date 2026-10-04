@@ -15,7 +15,14 @@ References: [SQL free offer](https://learn.microsoft.com/en-us/azure/azure-sql/d
 
 ## 1. Sign in to Azure and bootstrap state/access
 
-Install Azure CLI locally, or use Azure Cloud Shell in Bash with an ephemeral session (no additional Cloud Shell storage). Sign in to the correct directory:
+Install Azure CLI locally, or use an ephemeral Azure Cloud Shell session. On Windows/PowerShell, use the native PowerShell bootstrap to avoid mixing Bash and Windows temporary-file paths:
+
+```powershell
+az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
+.\scripts\bootstrap-azure.ps1
+```
+
+In Linux Bash/Cloud Shell:
 
 ```bash
 az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
