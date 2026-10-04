@@ -25,7 +25,10 @@ case "$1 $2" in
       list) printf '0\r\n' ;;
       create) printf '00000000-0000-0000-0000-000000000003\r\n' ;;
       federated-credential)
-        if [[ "$4" == list ]]; then printf '0\r\n'; else
+        if [[ "$4" == show ]]; then
+          [[ "${MOCK_EXISTING_CREDENTIAL:-false}" == true ]] || exit 1
+        else
+          operation=$4
           while [[ "$1" != --parameters ]]; do shift; done
           file_path=${2#@}
           case "${OSTYPE:-}" in
@@ -34,9 +37,9 @@ case "$1 $2" in
               file_path=$(cygpath -u "$file_path") ;;
           esac
           [[ -r "$file_path" ]]
-          grep -q 'repo:JeffCousineau/NetValue-deployment:environment:production' "$file_path"
+          grep -q 'repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production' "$file_path"
           [[ "${MSYS_NO_PATHCONV:-}" == 1 && "${MSYS2_ARG_CONV_EXCL:-}" == '*' ]]
-          touch "$MOCK_FILE_READ"
+          printf '%s\n' "$operation" >> "$MOCK_FILE_READ"
         fi ;;
     esac ;;
   *) echo "Unexpected mock command: $*" >&2; exit 98 ;;
@@ -66,6 +69,9 @@ unset MOCK_TENANT
 export MOCK_COMPLETE=true
 export MOCK_FILE_READ="$fixture/file-read"
 bash "$scripts/bootstrap-azure.sh" > "$fixture/output" 2>&1 || { cat "$fixture/output"; exit 1; }
-[[ -f "$MOCK_FILE_READ" ]]
+[[ $(cat "$MOCK_FILE_READ") == create ]]
+export MOCK_EXISTING_CREDENTIAL=true
+bash "$scripts/bootstrap-azure.sh" > "$fixture/output" 2>&1 || { cat "$fixture/output"; exit 1; }
+[[ $(tail -n 1 "$MOCK_FILE_READ") == update ]]
 grep -q 'GitHub production environment variables:' "$fixture/output"
 echo 'Azure CLI CRLF, native JSON paths, failure propagation, tenant guard, and IP handling checks passed.'

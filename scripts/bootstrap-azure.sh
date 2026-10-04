@@ -38,11 +38,15 @@ if [[ "$app_count" == 0 ]]; then
   az ad sp create --id "$client_id" --output none
 else client_id=$(az ad app list --display-name "$identity_name" --query '[0].appId' -o tsv); fi
 principal_id=$(az ad sp show --id "$client_id" --query id -o tsv)
-if [[ $(az ad app federated-credential list --id "$client_id" --query "length([?name=='github-production'])" -o tsv) == 0 ]]; then
-  credential_file=$(mktemp)
-  trap 'rm -f "$credential_file"' EXIT
-  printf '%s' '{"name":"github-production","issuer":"https://token.actions.githubusercontent.com","subject":"repo:JeffCousineau/NetValue-deployment:environment:production","audiences":["api://AzureADTokenExchange"]}' > "$credential_file"
-  credential_path=$(azure_cli_path "$credential_file")
+# Repository-bound immutable subject verified against GitHub's production OIDC token.
+credential_file=$(mktemp)
+trap 'rm -f "$credential_file"' EXIT
+credential_path=$(azure_cli_path "$credential_file")
+if az ad app federated-credential show --id "$client_id" --federated-credential-id github-production --output none 2>/dev/null; then
+  printf '%s' '{"issuer":"https://token.actions.githubusercontent.com","subject":"repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production","audiences":["api://AzureADTokenExchange"]}' > "$credential_file"
+  az ad app federated-credential update --id "$client_id" --federated-credential-id github-production --parameters "@$credential_path" --output none
+else
+  printf '%s' '{"name":"github-production","issuer":"https://token.actions.githubusercontent.com","subject":"repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production","audiences":["api://AzureADTokenExchange"]}' > "$credential_file"
   az ad app federated-credential create --id "$client_id" --parameters "@$credential_path" --output none
 fi
 az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role Contributor --scope "/subscriptions/$subscription/resourceGroups/rg-netvalue-free" --output none
