@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/azure-cli.sh"
-# Exact App Service outbound IPv4 addresses only. No AllowAzureServices rule.
+# Exact possible App Service outbound IPv4 addresses only. No AllowAzureServices rule.
+# Shared/F1 workers can use addresses outside the current outboundIpAddresses list.
 app_name=${1:?Supply web app name}
 server_name=${2:?Supply SQL server name}
-ips=$(az webapp show -g rg-netvalue-free -n "$app_name" --query outboundIpAddresses -o tsv)
+ips=$(az webapp show -g rg-netvalue-free -n "$app_name" --query possibleOutboundIpAddresses -o tsv)
 [[ -n "$ips" ]] || { echo 'No outbound IP addresses returned'; exit 1; }
 IFS=',' read -ra addresses <<< "$ips"
 index=0
