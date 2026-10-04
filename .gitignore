@@ -17,3 +17,5 @@ terraform.rc
 *.key
 *.pfx
 *.p12
+
+backend.hcl
