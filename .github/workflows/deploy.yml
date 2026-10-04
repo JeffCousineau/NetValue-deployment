@@ -31,12 +31,10 @@ jobs:
       - name: Check deployment prerequisites
         env:
           SQL_ACCESS_READY: ${{ vars.SQL_ACCESS_READY }}
-          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
         run: |
           test "$SQL_ACCESS_READY" = 'true'
           test -n "$APP_NAME"
           test -n "$SQL_SERVER"
-          test -n "$ENTRA_CLIENT_SECRET"
           git -C application rev-parse HEAD
       - uses: actions/setup-dotnet@v4
         with:
@@ -52,14 +50,38 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Synchronize app SQL firewall access
-        run: bash scripts/allow-app-sql.sh "$APP_NAME" "$SQL_SERVER"
-      - name: Temporarily allow this migration runner
-        id: firewall
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.5
+      - name: Synchronize app SQL firewall with Terraform
+        env:
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: 'true'
+          ARM_USE_AZUREAD: 'true'
+        run: |
+          terraform -chdir=app-access init -backend-config=backend.example.hcl -backend-config='use_oidc=true'
+          terraform -chdir=app-access plan -out=reviewed.tfplan
+          terraform -chdir=app-access apply reviewed.tfplan
+      - name: Get the migration runner IPv4
+        id: runner
         run: |
           runner_ip=$(curl --fail --silent --show-error https://api.ipify.org)
           python3 -c 'import ipaddress,sys; ipaddress.IPv4Address(sys.argv[1])' "$runner_ip"
-          az sql server firewall-rule create --resource-group rg-netvalue-free --server "$SQL_SERVER" --name "github-${GITHUB_RUN_ID}" --start-ip-address "$runner_ip" --end-ip-address "$runner_ip" --output none
+          echo "ip=$runner_ip" >> "$GITHUB_OUTPUT"
+      - name: Temporarily allow migration runner with Terraform
+        id: firewall
+        env:
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: 'true'
+          TF_VAR_runner_ip: ${{ steps.runner.outputs.ip }}
+          TF_VAR_rule_name: github-${{ github.run_id }}
+        run: |
+          terraform -chdir=runner-access init
+          terraform -chdir=runner-access apply -auto-approve
       - name: Apply database schema migrations
         env:
           Database__Provider: SqlServer
@@ -67,20 +89,18 @@ jobs:
         run: |
           export ConnectionStrings__NetValue="Server=tcp:${SQL_SERVER}.database.windows.net,1433;Database=NetValue;Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Pooling=False;"
           dotnet package/NetValue.dll --migrate-database
-      - name: Remove migration runner firewall access
-        if: always() && steps.firewall.outcome == 'success'
-        run: az sql server firewall-rule delete --resource-group rg-netvalue-free --server "$SQL_SERVER" --name "github-${GITHUB_RUN_ID}" --output none
-      - name: Set the authentication secret outside Terraform
+      - name: Remove migration runner access with Terraform
+        if: always() && steps.firewall.outcome != 'skipped' && steps.runner.outcome == 'success'
         env:
-          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: 'true'
+          TF_VAR_runner_ip: ${{ steps.runner.outputs.ip }}
+          TF_VAR_rule_name: github-${{ github.run_id }}
+        run: terraform -chdir=runner-access destroy -auto-approve
+      - name: Check App Service availability
         run: |
-          secret_file=$(mktemp)
-          trap 'rm -f "$secret_file"' EXIT
-          SECRET_FILE="$secret_file" python3 -c 'import os,json; open(os.environ["SECRET_FILE"],"w").write(json.dumps({"Authentication__ClientSecret":os.environ["ENTRA_CLIENT_SECRET"]}))'
-          az webapp config appsettings set --resource-group rg-netvalue-free --name "$APP_NAME" --settings "@$secret_file" --output none
-      - name: Start App Service and check availability
-        run: |
-          az webapp start --resource-group rg-netvalue-free --name "$APP_NAME" --output none
           state=$(az webapp show --resource-group rg-netvalue-free --name "$APP_NAME" --query state --output tsv)
           if [ "$state" != 'Running' ]; then
             echo "App Service is $state. Check F1 quotas and retry after reset; do not upgrade to a paid tier."

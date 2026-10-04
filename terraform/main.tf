@@ -30,6 +30,14 @@ resource "azurerm_linux_web_app" "netvalue" {
     scm_minimum_tls_version = "1.2"
     application_stack { dotnet_version = "10.0" }
   }
+  logs {
+    http_logs {
+      file_system {
+        retention_in_days = 3
+        retention_in_mb   = 100
+      }
+    }
+  }
   app_settings = {
     ASPNETCORE_ENVIRONMENT              = "Production"
     Database__Provider                  = "SqlServer"
@@ -37,15 +45,16 @@ resource "azurerm_linux_web_app" "netvalue" {
     ASPNETCORE_FORWARDEDHEADERS_ENABLED = "true"
     WEBSITE_RUN_FROM_PACKAGE            = "1"
     Authentication__TenantId            = var.tenant_id
-    Authentication__ClientId            = "209f8009-5376-440d-8d26-f7316be55321"
+    Authentication__ClientId            = data.terraform_remote_state.foundation.outputs.signin_client_id
+    Authentication__ClientSecret        = sensitive(data.terraform_remote_state.foundation.outputs.signin_client_secret)
     Households__BootstrapOwnerObjectId  = var.owner_object_id
     AllowedHosts                        = "${local.name}.azurewebsites.net"
     ConnectionStrings__NetValue         = "Server=tcp:${local.sql_name}.database.windows.net,1433;Database=NetValue;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Pooling=False;"
   }
   tags = local.tags
-  # GitHub sets the client secret after provisioning. Never pass it as a TF variable.
+  # The generated sign-in credential is held only in private Terraform states.
   # Azure provider refresh can still include app settings in private remote state.
-  lifecycle { ignore_changes = [app_settings] }
+
 }
 resource "azurerm_mssql_server" "netvalue" {
   name                = local.sql_name
@@ -69,7 +78,7 @@ resource "azapi_resource" "database" {
   parent_id = azurerm_mssql_server.netvalue.id
   location  = var.location
   body = {
-    sku = { name = "GP_S_Gen5_2", tier = "GeneralPurpose", family = "Gen5", capacity = 2 }
+    sku = { name = "GP_S_Gen5", tier = "GeneralPurpose", family = "Gen5", capacity = 2 }
     properties = {
       useFreeLimit                     = true
       freeLimitExhaustionBehavior      = "AutoPause"

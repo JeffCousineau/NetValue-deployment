@@ -77,7 +77,3 @@ resource "azapi_resource" "budget" {
 
   }
 }
-import {
-  to = azapi_resource.budget
-  id = "/subscriptions/0bc9dd71-16c4-428e-8160-8a90c7c892f5/providers/Microsoft.Consumption/budgets/Monthly_NetValue"
-}

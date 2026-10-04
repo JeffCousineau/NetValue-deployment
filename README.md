@@ -1,119 +1,103 @@
 # NetValue deployment
 
-Deployment configuration for [NetValue](https://github.com/JeffCousineau/NetValue), targeting subscription `0bc9dd71-16c4-428e-8160-8a90c7c892f5` in **Canada Central**.
+Terraform manages Azure infrastructure for [NetValue](https://github.com/JeffCousineau/NetValue) in Canada Central. Azure CLI is used for login and read-only diagnostics. Application package deployment, EF schema migrations, and restoring financial data remain application operations.
 
-## Cost choices
+## Cost and access constraints
 
-- Linux App Service **F1 Free**, with Always On disabled. Limited CPU time and five concurrent WebSocket connections; idle shutdowns/reconnects are expected.
-- Azure SQL free offer: `useFreeLimit=true`, `freeLimitExhaustionBehavior=AutoPause`, 32 GB maximum data, local backup redundancy. Free compute exhaustion makes the database unavailable until next month. There is no paid SKU fallback.
-- Standard Hot/LRS Blob Storage for a private Terraform state file. This is the one intentionally paid component; light usage is expected to cost a few cents per month, not a guaranteed billing cap.
-- GitHub repository/environment secrets for the Entra sign-in client secret. Azure deployment uses OIDC; SQL uses managed identity. No Key Vault, Application Insights, Log Analytics, private endpoints, Redis, or Azure Container Registry.
+- Linux App Service F1 Free, Always On disabled. Free quotas and idle shutdowns can cause downtime.
+- Azure SQL free offer, 32 GB maximum data, local backup redundancy, `useFreeLimit=true`, and `AutoPause` when the free allowance is exhausted. No paid fallback.
+- Private Standard Hot/LRS Blob storage for Terraform state. This small paid component is expected to cost cents with light usage; this is not a billing guarantee.
+- No Key Vault, monitoring workspace, private endpoints, or container registry. Managed identity for SQL; GitHub OIDC for deployment; Terraform generates the sign-in client secret.
+- Exact App Service possible outbound IPs for SQL access. One exact temporary owner/runner IP is allowed only while managing SQL permissions or migrating schema. No broad AllowAzureServices rule.
+- GitHub identity has Contributor only on the app resource group and Blob Data Contributor only on the state container. Owner-only stacks manage identities, RBAC, and the subscription budget.
 
-The subscription's `Monthly_NetValue` budget monitors total spending, including the state storage account. It is 20 CAD/month and sends French email alerts at 0.20 CAD (1%), 1 CAD (5%), 10 CAD (the existing 50% alert), and 20 CAD (100%), plus a forecast alert at 100%. Budget alerts do not stop spending. Verify free-offer eligibility, existing free-database region restrictions, F1 capacity, and .NET 10 runtime availability in Canada Central before applying. Stop if unavailable; do not upgrade to a paid tier. Terraform state is private and may contain secret app settings when the Azure provider refreshes the app. Never commit, upload as a workflow artifact, or expose state/plan files in public logs. Leave detailed debug logging off.
+The subscription budget is 20 CAD/month with French actual-spend alerts at 0.20, 1, 10, and 20 CAD, plus a 20 CAD forecast alert. Budgets notify; they do not stop spending. Cost data can be delayed 8–24 hours and budgets are evaluated daily.
 
-References: [SQL free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer), [App Service pricing](https://azure.microsoft.com/en-us/pricing/details/app-service/linux/), [Blob pricing](https://azure.microsoft.com/en-ca/pricing/details/storage/blobs/).
+## Terraform stacks
 
-## 1. Sign in to Azure and bootstrap state/access
+| Directory | Resources | State / operator |
+|---|---|---|
+| `bootstrap/` | Resource-provider registrations, state resource group/account/container, owner Blob access | Private local state; subscription owner |
+| `foundation/` | App resource group, sign-in and deployment applications/service principals, GitHub OIDC, scoped RBAC, redirects, generated sign-in credential | `netvalue.foundation.tfstate`; owner with Entra application permissions |
+| `terraform/` | F1 plan/app, managed identity, Entra-only SQL server/free database, app settings including sign-in credential | `netvalue.terraform.tfstate`; owner or GitHub deployment identity |
+| `app-access/` | Exact possible App Service outbound-IP SQL rules | `netvalue.app-access.tfstate`; owner or GitHub deployment identity |
+| `runner-access/` | One temporary exact-IP firewall rule | Ephemeral local state; owner or GitHub deployment identity |
+| `sql-access/` | App/deployment SQL users and database-role memberships | `netvalue.sql-access.tfstate`; SQL Entra administrator |
+| `cost-alerts/` | Subscription budget and five notifications | `netvalue.cost-alerts.tfstate`; subscription budget administrator |
 
-Install Azure CLI locally, or use an ephemeral Azure Cloud Shell session. On Windows/PowerShell, use the native PowerShell bootstrap to avoid mixing Bash and Windows temporary-file paths:
+The running infrastructure has been imported into these stacks. Import blocks are not retained in the source: a fresh rebuild creates resources instead of attempting to import deleted ones. The SQL stack pins the community `muecahit94/mssql` provider to 1.5.0 and uses explicit service-principal **client IDs** for SQL SIDs. It does not require granting Directory Readers to the SQL server.
 
-```powershell
-az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
-.\scripts\bootstrap-azure.ps1
-```
+## Rebuild using Terraform
 
-In Linux Bash/Cloud Shell:
-
-```bash
-az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
-bash scripts/bootstrap-azure.sh
-```
-
-The script **creates resources**: two resource groups, a small StorageV2 account/private `tfstate` container, a separate Entra deployment app/service principal, and scoped RBAC assignments. Shared-key and anonymous blob access are disabled. It registers Storage, Web, and SQL resource providers. Run as an Azure owner with permission to create Entra app registrations and assign roles. Reruns reuse the named resources; storage charges begin when used. State-storage bootstrap resources are intentionally outside the application Terraform state so applying/destroying the app cannot delete its own backend. Preserve them and their access configuration.
-
-Bootstrap prints the non-secret GitHub variable values; it does not create a deployment client secret. It grants the deployment identity Contributor on `rg-netvalue-free` and Storage Blob Data Contributor on only the state container. Your account also gets state access. No subscription-wide Contributor grant is needed.
-
-## 2. GitHub production environment
-
-In **JeffCousineau/NetValue-deployment**, Settings → Environments → create `production`. Restrict deployment branches to `main` and configure a required reviewer where supported. Keep the Actions spending budget at zero/no paid overages and use standard Ubuntu runners. Workflows only run through **Run workflow** on `main`; pushes and PRs do not deploy.
-
-Add environment variables from the bootstrap output:
-
-| Variable | Value |
-|---|---|
-| AZURE_CLIENT_ID | New deployment application's client ID, NOT NetValue's sign-in application ID |
-| AZURE_TENANT_ID | e099407c-b3b3-45aa-868e-cc901f513dc5 |
-| AZURE_SUBSCRIPTION_ID | 0bc9dd71-16c4-428e-8160-8a90c7c892f5 |
-| TF_STATE_ACCOUNT | Bootstrap storage account name |
-| AZURE_WEB_APP_NAME | Bootstrap app name |
-| SQL_SERVER_NAME | Bootstrap SQL server name |
-| FREE_OFFER_VERIFIED | `true` only after confirming subscription/region eligibility |
-| SQL_ACCESS_READY | Leave unset until completing SQL access below |
-
-Add **ENTRA_CLIENT_SECRET** as a production environment secret: the secret VALUE from the existing NetValue sign-in app registration (`209f8009-5376-440d-8d26-f7316be55321`). Enter it directly in GitHub; do not paste it into chat, files, or command history. GitHub injects it into the App Service configuration, not Terraform variables. It can still appear in private Terraform state on provider refresh.
-
-Bootstrap creates or updates the production federated credential, so rerunning it repairs the previous name-only subject. This repository uses GitHub's [immutable OIDC subject format](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims), including owner ID `8643172` and repository ID `1403790853`. Update the scripts if recreating or transferring this repository changes its subject.
-
-The deployment app's federated credential is bound to `repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production`, issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
-
-## 3. Review and create application infrastructure
-
-Run **Infrastructure** with operation `plan`. Review that the only app plan is F1, SQL has `useFreeLimit=true` and `AutoPause`, and no additional paid services are included. Then run with operation `apply` after review. Both operations require free-offer confirmation. Apply generates a fresh saved plan and applies that exact file; no state or plans are published as artifacts. Azure may reject capacity/eligibility; the workflow stops rather than provisioning a paid alternative.
-
-Save the output URL, SQL host, app principal ID, and outbound IP list. The SQL server uses Entra-only authentication and your configured owner Object ID as SQL administrator. Initially no SQL firewall rules are opened.
-
-For manual Terraform execution, copy `terraform/backend.example.hcl` to an ignored `terraform/backend.hcl`, fill the storage account name, then run:
-
-```bash
-terraform -chdir=terraform init -backend-config=backend.hcl
-terraform -chdir=terraform plan -var='free_offer_verified=true'
-```
-
-Local runs use `az login`; GitHub uses OIDC. The remote backend uses Entra data-plane access and native Blob lease locking, not account keys. Do not run `terraform init -migrate-state` unless moving an existing backend deliberately. Database deletion is protected with `prevent_destroy`; no destroy workflow is provided.
-
-## 4. SQL access and Entra redirects
-
-Run `bash scripts/allow-app-sql.sh <web-app-name> <sql-server-name>` to allow only the app's exact possible outbound IPv4 addresses. The F1/shared worker can use addresses outside the current-IP list, so the script uses `possibleOutboundIpAddresses`. The deployment workflow synchronizes these rules before migrations. Keep them aligned if Azure changes the possible address set. No broad AllowAzureServices firewall rule is enabled.
-
-Temporarily add your own workstation IPv4 to the SQL firewall in the Azure portal. Connect to the `NetValue` database with Microsoft Entra authentication as the configured owner/admin, using SSMS or another SQL client. Replace the two GUID placeholders in `scripts/sql-access.sql` with the **web app client/application ID** and **deployment client ID** (`AZURE_CLIENT_ID` from bootstrap), then execute it. Resolve the web app client ID with `az ad sp show --id <web_app_principal_id> --query appId -o tsv`. The `CREATE USER ... WITH SID ... TYPE = E` syntax requires the service principal's client ID; do not use the object/principal ID. See [Microsoft's CREATE USER service-principal example](https://learn.microsoft.com/en-us/sql/t-sql/statements/create-user-transact-sql). The app gets read/write roles. The deployment identity additionally gets schema-change permissions for EF migrations. These database roles are separate from Azure RBAC. Remove your workstation rule when finished.
-
-In the existing NetValue Entra app registration → Authentication → Web, add:
-
-- `https://<web-app-name>.azurewebsites.net/signin-oidc`
-- `https://<web-app-name>.azurewebsites.net/signout-callback-oidc`
-
-Keep localhost redirect URIs for local development. Set the GitHub environment variable `SQL_ACCESS_READY=true` once SQL roles/firewall and redirects are ready. The app's forwarded-headers setting handles the Azure HTTPS proxy. Validate HTTPS redirects and persisted data-protection keys on the first cloud run before relying on sessions across restarts.
-
-## 5. Deploy and import your data
-
-Run **Deploy NetValue**, preferably choosing the reviewed application commit SHA as `source_ref`. It checks out the public NetValue repository, runs all checks, publishes .NET 10 without App_Data, signs in through OIDC, temporarily allows the runner's exact IPv4 to SQL, applies EF schema migrations, removes the temporary rule, sets the Entra secret without printing it, and deploys the tested package. If a runner is forcibly killed, remove any leftover `github-<run-id>` firewall rule manually. Failed migrations stop deployment. No automatic paid upgrades, database imports, or fallback schemas are performed.
-
-Open the HTTPS app URL and sign in as the configured owner. For your current single-household setup, download a financial backup from the local app and restore it in Azure through Settings; Azure bootstrap creates your owner membership, and restore preserves it. Existing local JSON/SQLite files remain private and are never deployed. If moving multiple household identities later, use the offline operator import from the application database documentation **before first sign-in**, into an empty schema.
-
-The app uses the .NET runtime's startup detection so initial provisioning does not try to launch a DLL before deployment. The deploy workflow starts a stopped app before uploading the package and stops on unavailable/free-quota states. If Azure reports `QuotaExceeded`, inspect App Service plan → Quotas and wait for the indicated reset; keep F1. Worker stop/restart requests also have an hourly quota, so avoid repeated failed-start or deployment attempts.
-
-Verify account balances, monthly progress, export, sign-out/sign-in, and recovery backups. SQL idle resumption and free App Service startup can be slow. Free quota exhaustion causes downtime instead of SQL overage charges. No live Azure deployment or free-tier capacity check has been performed merely by writing these files.
-
-## Cost alerts
-
-The `cost-alerts/` Terraform stack manages the existing subscription budget `Monthly_NetValue`, including all five notifications described above. Its import block adopts the existing budget; review the first plan to ensure the budget amount, dates, recipients, and alerts are preserved. AzAPI may require a one-time metadata normalization after importing. Deletion is protected with `prevent_destroy`.
-
-Run this stack locally as the subscription owner with Terraform 1.10 or later and Azure CLI installed. It uses a separate Blob state key, `netvalue.cost-alerts.tfstate`, in the existing private state container. The application Infrastructure workflow continues to manage only `terraform/`; the GitHub deployment identity has no subscription-wide budget permissions.
-
-From the repository root in PowerShell:
+Install Terraform 1.10 or later and Azure CLI, then sign in as the owner. Check Azure SQL free-offer eligibility, F1 availability, and .NET 10 support before proceeding; do not substitute paid tiers.
 
 ```powershell
 az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
 az account set --subscription 0bc9dd71-16c4-428e-8160-8a90c7c892f5
-.\scripts\prepare-cost-alerts.ps1
-terraform '-chdir=cost-alerts' init '-backend-config=backend.hcl'
-terraform '-chdir=cost-alerts' plan '-out=cost-alerts.tfplan'
-# Review the plan before applying it.
-terraform '-chdir=cost-alerts' apply cost-alerts.tfplan
+terraform '-chdir=bootstrap' init
+terraform '-chdir=bootstrap' plan '-out=reviewed.tfplan'
+terraform '-chdir=bootstrap' apply reviewed.tfplan
+
+terraform '-chdir=foundation' init '-backend-config=backend.example.hcl'
+terraform '-chdir=foundation' plan '-out=reviewed.tfplan'
+terraform '-chdir=foundation' apply reviewed.tfplan
+
+terraform '-chdir=terraform' init '-backend-config=backend.example.hcl'
+terraform '-chdir=terraform' plan '-var=free_offer_verified=true' '-out=reviewed.tfplan'
+terraform '-chdir=terraform' apply reviewed.tfplan
+
+terraform '-chdir=app-access' init '-backend-config=backend.example.hcl'
+terraform '-chdir=app-access' plan '-out=reviewed.tfplan'
+terraform '-chdir=app-access' apply reviewed.tfplan
 ```
 
-The preparation helper only reads Azure. It copies the existing amount, dates, and original notification recipients into ignored `cost-alerts/private.auto.tfvars.json` and writes ignored `cost-alerts/backend.hcl`. Email addresses are sensitive Terraform inputs and remain outside Git. State and saved plans contain recipient information; keep them private and never publish them as workflow artifacts. The existing budget has been imported and verified with a clean plan. Subsequent plans should report no changes unless you edit the configuration or Azure changes externally. To change the amount, dates, or recipients, edit the private variables and review a fresh plan; rerunning the helper restores those variables from Azure. Notification thresholds and language are defined in `cost-alerts/main.tf`.
+Review every saved plan before applying. Wait for new Blob RBAC assignments to propagate if Azure initially rejects access, then retry Terraform. Foundation secrets and IDs flow into app configuration through private remote state; no portal redirect changes or client-secret setup script is required.
 
-Cost data can take 8–24 hours to appear; Azure evaluates budgets daily. These are delayed notifications, not a real-time spending cap. No paid monitoring workspace, action group, or automatic resource shutdown is configured. Managing the budget does not require redeploying NetValue.
+To create database users, temporarily allow the workstation's public IPv4 (replace the example), apply SQL access as the configured owner, then remove the temporary rule. These commands manage permissions, not financial data or EF schema:
 
-Reference: [Azure budget notifications](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets).
+```powershell
+$env:TF_VAR_runner_ip = 'YOUR_PUBLIC_IPV4'
+terraform '-chdir=runner-access' init
+terraform '-chdir=runner-access' plan '-out=reviewed.tfplan'
+terraform '-chdir=runner-access' apply reviewed.tfplan
+terraform '-chdir=sql-access' init '-backend-config=backend.example.hcl'
+terraform '-chdir=sql-access' plan '-out=reviewed.tfplan'
+terraform '-chdir=sql-access' apply reviewed.tfplan
+# Always remove temporary access, including after an unsuccessful SQL operation.
+terraform '-chdir=runner-access' destroy
+Remove-Item Env:TF_VAR_runner_ip
+```
+
+Configure the budget recipients privately. Create an ignored `cost-alerts/private.auto.tfvars.json` with `contact_emails` as an array of recipient addresses; optionally set `budget_start` and `budget_end` for the desired current validity period. Its existing private variables are preserved locally. Never put recipient addresses into public source.
+
+```powershell
+terraform '-chdir=cost-alerts' init '-backend-config=backend.example.hcl'
+terraform '-chdir=cost-alerts' plan '-out=reviewed.tfplan'
+terraform '-chdir=cost-alerts' apply reviewed.tfplan
+```
+
+## GitHub configuration and app deployment
+
+Use the existing `production` environment in `JeffCousineau/NetValue-deployment`, restricted to main. Workflows are manual; pushes and PRs do not deploy. Keep GitHub Actions paid overages disabled.
+
+Set `AZURE_CLIENT_ID` from `terraform -chdir=foundation output -raw deployment_client_id`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TF_STATE_ACCOUNT` from bootstrap, `AZURE_WEB_APP_NAME`, and `SQL_SERVER_NAME` from app outputs. Set `FREE_OFFER_VERIFIED=true` after eligibility review and `SQL_ACCESS_READY=true` after SQL access succeeds. Refresh client IDs in GitHub and local development configuration if rebuilding the Entra registrations generates new IDs. The old GitHub `ENTRA_CLIENT_SECRET` is no longer used; Terraform manages the Azure sign-in credential.
+
+The production federated subject uses immutable owner/repository IDs: `repo:JeffCousineau@8643172/NetValue-deployment@1403790853:environment:production`. Update foundation configuration when recreating or transferring the repository changes these IDs.
+
+**Infrastructure** reviews/applies the app stack and synchronizes app firewall rules with Terraform after apply. Broader owner-only stacks run locally. **Deploy NetValue** checks the selected source ref, runs application checks, publishes .NET 10 without private App_Data, synchronizes app access with Terraform, creates a temporary runner firewall rule with Terraform, migrates the EF schema, removes runner access with Terraform in an always-run step, and deploys the tested package. It does not set secrets or create infrastructure through Azure CLI. A forcibly terminated job may leave a runner rule; recreate its local runner-access state using Terraform import and remove it with Terraform destroy.
+
+App Service must be Running for package deployment. If stopped, use Terraform to reconcile the app resource. F1 quota exhaustion requires waiting for the reset; do not upgrade tiers. Free SQL resumption and App Service startup may be slow.
+
+Deploy the application after recreating infrastructure, then sign in and restore the financial backup through Settings. For multiple household identities, follow the application's database migration documentation. Terraform cannot recover financial data from a deleted database.
+
+## Private state, rotation, and deliberate teardown
+
+Private state and plans can contain generated credentials and recipient information. Never commit them, publish them as workflow artifacts, or enable detailed debug logs. Blob state uses AzureAD authentication and lease locking; account keys and public access are disabled. The bootstrap backend stores local state outside both repositories at `../NetValue-private/bootstrap.tfstate` (relative to the deployment repository). Keep this directory private. This state and all backups must be stored privately and protected, ideally on an encrypted disk. Keep a backup outside the state storage account before teardown.
+
+Before the managed sign-in credential expires (one year), increment `signin_secret_version`, apply foundation, then immediately apply application infrastructure. Terraform creates the replacement before deleting its previous managed credential; apply both stacks in the same maintenance session. Local development using the old manually created credential continues to use its own secret until you intentionally update it.
+
+Database/server, resource groups, state storage/container, provider registrations, and SQL users have `prevent_destroy` guards. A full teardown is deliberately not an ordinary apply. First export financial data and privately back up every Terraform state and private variables. Remove the relevant guards only in an explicitly reviewed destructive change. Destroy in reverse dependency order: SQL access (while temporary owner access exists), app access, app infrastructure, foundation, then bootstrap last. The budget is subscription-scoped and can be kept; remove its guard and destroy its stack only if intentionally deleting alerts. Do not unregister providers while any other subscription resources use them. If deleting state storage, restore empty/appropriately reconciled states for a new build; do not point Terraform at stale records of deleted resources. Preserve the bootstrap local state until teardown has finished.
+
+Verification of this migration imports and reconciles the running resources. It does not destroy and recreate the live financial database as a test.
+
+References: [Azure SQL free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer), [Azure budget notifications](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets), [Terraform AzureAD backend](https://developer.hashicorp.com/terraform/language/backend/azurerm).
