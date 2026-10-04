@@ -9,7 +9,7 @@ Deployment configuration for [NetValue](https://github.com/JeffCousineau/NetValu
 - Standard Hot/LRS Blob Storage for a private Terraform state file. This is the one intentionally paid component; light usage is expected to cost a few cents per month, not a guaranteed billing cap.
 - GitHub repository/environment secrets for the Entra sign-in client secret. Azure deployment uses OIDC; SQL uses managed identity. No Key Vault, Application Insights, Log Analytics, private endpoints, Redis, or Azure Container Registry.
 
-Cost monitoring is a future task. Budget alerts do not stop spending. Verify free-offer eligibility, existing free-database region restrictions, F1 capacity, and .NET 10 runtime availability in Canada Central before applying. Stop if unavailable; do not upgrade to a paid tier. Terraform state is private and may contain secret app settings when the Azure provider refreshes the app. Never commit, upload as a workflow artifact, or expose state/plan files in public logs. Leave detailed debug logging off.
+The subscription's `Monthly_NetValue` budget monitors total spending, including the state storage account. It is 20 CAD/month and sends French email alerts at 0.20 CAD (1%), 1 CAD (5%), 10 CAD (the existing 50% alert), and 20 CAD (100%), plus a forecast alert at 100%. Budget alerts do not stop spending. Verify free-offer eligibility, existing free-database region restrictions, F1 capacity, and .NET 10 runtime availability in Canada Central before applying. Stop if unavailable; do not upgrade to a paid tier. Terraform state is private and may contain secret app settings when the Azure provider refreshes the app. Never commit, upload as a workflow artifact, or expose state/plan files in public logs. Leave detailed debug logging off.
 
 References: [SQL free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer), [App Service pricing](https://azure.microsoft.com/en-us/pricing/details/app-service/linux/), [Blob pricing](https://azure.microsoft.com/en-ca/pricing/details/storage/blobs/).
 
@@ -93,3 +93,11 @@ Open the HTTPS app URL and sign in as the configured owner. For your current sin
 The app uses the .NET runtime's startup detection so initial provisioning does not try to launch a DLL before deployment. The deploy workflow starts a stopped app before uploading the package and stops on unavailable/free-quota states. If Azure reports `QuotaExceeded`, inspect App Service plan → Quotas and wait for the indicated reset; keep F1. Worker stop/restart requests also have an hourly quota, so avoid repeated failed-start or deployment attempts.
 
 Verify account balances, monthly progress, export, sign-out/sign-in, and recovery backups. SQL idle resumption and free App Service startup can be slow. Free quota exhaustion causes downtime instead of SQL overage charges. No live Azure deployment or free-tier capacity check has been performed merely by writing these files.
+
+## Cost alerts
+
+Run `scripts/setup-cost-alerts.ps1` as the signed-in Azure subscription owner to update the existing `Monthly_NetValue` monthly cost budget. It preserves its amount, filter/scope, dates, original notification, recipients, and language; it adds actual thresholds of 1%, 5%, and 100% and a forecast threshold of 100%. Rerunning is safe and uses the existing budget eTag to avoid overwriting concurrent edits. Recipient email addresses are read from Azure and are never stored in this public repository.
+
+Cost data can take 8–24 hours to appear; Azure evaluates budgets daily. These are delayed notifications, not a real-time spending cap. No paid monitoring workspace, action group, or automatic resource shutdown is configured. The GitHub deployment identity needs no additional subscription permissions because budget setup runs as the owner.
+
+Reference: [Azure budget notifications](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets).
