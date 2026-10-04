@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/azure-cli.sh"
 # Run once as an Azure owner who can create app registrations and assign RBAC.
 subscription="0bc9dd71-16c4-428e-8160-8a90c7c892f5"
 tenant="e099407c-b3b3-45aa-868e-cc901f513dc5"
@@ -7,7 +8,11 @@ suffix=$(printf '%s' "$subscription" | sha256sum | cut -c1-8)
 state_account="nvstate${suffix}"
 app_name="netvalue-${suffix}"
 az account set --subscription "$subscription"
-[[ $(az account show --query tenantId -o tsv) == "$tenant" ]] || { echo 'Wrong Azure directory'; exit 1; }
+actual_tenant=$(az account show --query tenantId -o tsv)
+if [[ "$actual_tenant" != "$tenant" ]]; then
+  printf 'Azure directory mismatch. Expected: %s; actual: %s\n' "$tenant" "$actual_tenant" >&2
+  exit 1
+fi
 for provider in Microsoft.Storage Microsoft.Web Microsoft.Sql; do
   az provider register --namespace "$provider" --wait --output none
 done
