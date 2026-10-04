@@ -47,6 +47,7 @@ resource "azurerm_linux_web_app" "netvalue" {
     ASPNETCORE_FORWARDEDHEADERS_ENABLED = "true"
     WEBSITE_RUN_FROM_PACKAGE            = "1"
     Authentication__TenantId            = var.tenant_id
+    Authentication__SelfServiceEnabled  = "true"
     Authentication__ClientId            = data.terraform_remote_state.foundation.outputs.signin_client_id
     Authentication__ClientSecret        = sensitive(data.terraform_remote_state.foundation.outputs.signin_client_secret)
     Households__BootstrapOwnerObjectId  = var.owner_object_id
