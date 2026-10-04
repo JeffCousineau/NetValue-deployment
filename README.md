@@ -96,8 +96,24 @@ Verify account balances, monthly progress, export, sign-out/sign-in, and recover
 
 ## Cost alerts
 
-Run `scripts/setup-cost-alerts.ps1` as the signed-in Azure subscription owner to update the existing `Monthly_NetValue` monthly cost budget. It preserves its amount, filter/scope, dates, original notification, recipients, and language; it adds actual thresholds of 1%, 5%, and 100% and a forecast threshold of 100%. Rerunning is safe and uses the existing budget eTag to avoid overwriting concurrent edits. Recipient email addresses are read from Azure and are never stored in this public repository.
+The `cost-alerts/` Terraform stack manages the existing subscription budget `Monthly_NetValue`, including all five notifications described above. Its import block adopts the existing budget; review the first plan to ensure the budget amount, dates, recipients, and alerts are preserved. AzAPI may require a one-time metadata normalization after importing. Deletion is protected with `prevent_destroy`.
 
-Cost data can take 8–24 hours to appear; Azure evaluates budgets daily. These are delayed notifications, not a real-time spending cap. No paid monitoring workspace, action group, or automatic resource shutdown is configured. The GitHub deployment identity needs no additional subscription permissions because budget setup runs as the owner.
+Run this stack locally as the subscription owner with Terraform 1.10 or later and Azure CLI installed. It uses a separate Blob state key, `netvalue.cost-alerts.tfstate`, in the existing private state container. The application Infrastructure workflow continues to manage only `terraform/`; the GitHub deployment identity has no subscription-wide budget permissions.
+
+From the repository root in PowerShell:
+
+```powershell
+az login --tenant e099407c-b3b3-45aa-868e-cc901f513dc5
+az account set --subscription 0bc9dd71-16c4-428e-8160-8a90c7c892f5
+.\scripts\prepare-cost-alerts.ps1
+terraform '-chdir=cost-alerts' init '-backend-config=backend.hcl'
+terraform '-chdir=cost-alerts' plan '-out=cost-alerts.tfplan'
+# Review the plan before applying it.
+terraform '-chdir=cost-alerts' apply cost-alerts.tfplan
+```
+
+The preparation helper only reads Azure. It copies the existing amount, dates, and original notification recipients into ignored `cost-alerts/private.auto.tfvars.json` and writes ignored `cost-alerts/backend.hcl`. Email addresses are sensitive Terraform inputs and remain outside Git. State and saved plans contain recipient information; keep them private and never publish them as workflow artifacts. The existing budget has been imported and verified with a clean plan. Subsequent plans should report no changes unless you edit the configuration or Azure changes externally. To change the amount, dates, or recipients, edit the private variables and review a fresh plan; rerunning the helper restores those variables from Azure. Notification thresholds and language are defined in `cost-alerts/main.tf`.
+
+Cost data can take 8–24 hours to appear; Azure evaluates budgets daily. These are delayed notifications, not a real-time spending cap. No paid monitoring workspace, action group, or automatic resource shutdown is configured. Managing the budget does not require redeploying NetValue.
 
 Reference: [Azure budget notifications](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets).
