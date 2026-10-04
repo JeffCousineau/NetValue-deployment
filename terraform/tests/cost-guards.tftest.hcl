@@ -18,6 +18,10 @@ run "requires_free_offer_verification" {
   expect_failures = [azurerm_service_plan.free]
 }
 run "uses_reviewed_cost_limits" {
+  assert {
+    condition = !azurerm_linux_web_app.netvalue.ftp_publish_basic_authentication_enabled && !azurerm_linux_web_app.netvalue.webdeploy_publish_basic_authentication_enabled
+    error_message = "Publishing must use Entra/OIDC rather than basic authentication."
+  }
   command = plan
   variables { free_offer_verified = true }
   assert {

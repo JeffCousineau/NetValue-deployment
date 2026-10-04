@@ -101,3 +101,13 @@ Database/server, resource groups, state storage/container, provider registration
 Verification of this migration imports and reconciles the running resources. It does not destroy and recreate the live financial database as a test.
 
 References: [Azure SQL free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer), [Azure budget notifications](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets), [Terraform AzureAD backend](https://developer.hashicorp.com/terraform/language/backend/azurerm).
+
+## Repository and publishing protection
+
+FTP and SCM/WebDeploy basic publishing authentication are disabled by the application Terraform stack. Deployments use the existing Entra/OIDC identity.
+
+Credential-free PR/push workflows provide `Application checks` and `Terraform checks`. Both main branches require a pull request, the matching GitHub Actions check, an up-to-date branch, and resolved review conversations. Administrators are subject to these rules; force pushes and branch deletion are blocked. No second reviewer is required while there is only one maintainer.
+
+The owner-run `github-security/` stack manages these branch protections and the existing production environment. Production runs require explicit approval from JeffCousineau, retain the main-only deployment restriction, and disallow administrator bypass. Self-review is allowed so the sole maintainer can approve their own workflow. Approval is a human step; automation must not approve its own production run.
+
+To recreate/update these GitHub settings, authenticate Azure CLI for the existing private Blob backend and provide a GitHub token through the `GITHUB_TOKEN` environment variable with repository administration and environment-management permissions. Never commit the token or place it in a Terraform variable file. Run `terraform -chdir=github-security init -backend-config=backend.example.hcl`, review `terraform -chdir=github-security plan -out=reviewed.tfplan`, then apply that plan. This stack uses `netvalue.github-security.tfstate`; it does not grant Azure privileges. Import an existing environment and its branch policy before managing them in a new state.
