@@ -42,7 +42,8 @@ if [[ $(az ad app federated-credential list --id "$client_id" --query "length([?
   credential_file=$(mktemp)
   trap 'rm -f "$credential_file"' EXIT
   printf '%s' '{"name":"github-production","issuer":"https://token.actions.githubusercontent.com","subject":"repo:JeffCousineau/NetValue-deployment:environment:production","audiences":["api://AzureADTokenExchange"]}' > "$credential_file"
-  az ad app federated-credential create --id "$client_id" --parameters "@$credential_file" --output none
+  credential_path=$(azure_cli_path "$credential_file")
+  az ad app federated-credential create --id "$client_id" --parameters "@$credential_path" --output none
 fi
 az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role Contributor --scope "/subscriptions/$subscription/resourceGroups/rg-netvalue-free" --output none
 az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role 'Storage Blob Data Contributor' --scope "$state_id/blobServices/default/containers/tfstate" --output none
