@@ -6,19 +6,34 @@ terraform {
   }
 }
 provider "github" { owner = "JeffCousineau" }
-resource "github_branch_protection_v3" "main" {
-  for_each                        = { NetValue = "Application checks", NetValue-deployment = "Terraform checks" }
-  repository                      = each.key
-  branch                          = "main"
-  enforce_admins                  = true
-  require_conversation_resolution = true
-  required_status_checks {
-    strict = true
-    checks = ["${each.value}:15368"] # GitHub Actions app, confirmed from successful CI runs.
+resource "github_repository_ruleset" "main" {
+  for_each    = { NetValue = "Application checks", NetValue-deployment = "Terraform checks" }
+  name        = "Protected main"
+  repository  = each.key
+  target      = "branch"
+  enforcement = "active"
+  # No bypass actors: these rules apply to the repository owner too.
+  conditions {
+    ref_name {
+      include = ["refs/heads/main"]
+      exclude = []
+    }
   }
-  required_pull_request_reviews {
-    required_approving_review_count = 0 # Solo maintainer: PR and checks required, no unavailable second reviewer.
-    dismiss_stale_reviews           = true
+  rules {
+    deletion         = true
+    non_fast_forward = true
+    pull_request {
+      required_approving_review_count   = 0
+      dismiss_stale_reviews_on_push     = true
+      required_review_thread_resolution = true
+    }
+    required_status_checks {
+      strict_required_status_checks_policy = true
+      required_check {
+        context        = each.value
+        integration_id = 15368
+      }
+    }
   }
 }
 resource "github_repository_environment" "production" {
