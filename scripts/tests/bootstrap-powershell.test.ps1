@@ -7,6 +7,7 @@ $global:NetValueTestProviderCalled = $false
 $global:NetValueTestContainerAttempts = 0
 function global:az {
     $global:LASTEXITCODE = 0
+    if ($args | Where-Object { $_ -match '[()]' }) { throw 'Command-shell metacharacters were passed to az.cmd' }
     switch ("$($args[0]) $($args[1])") {
         'account show' { return "$global:NetValueTestMockTenant`r`n" }
         'account set' { return }
@@ -27,11 +28,11 @@ function global:az {
         'ad sp' { return '00000000-0000-0000-0000-000000000002' }
         'ad app' {
             if ($args[2] -eq 'list') {
-                if ($args -contains 'length(@)') { return "1`r`n" }
-                return '00000000-0000-0000-0000-000000000003'
+                $nameIndex = [Array]::IndexOf($args, '--display-name')
+                return (ConvertTo-Json -InputObject @(@{ displayName = $args[$nameIndex + 1]; appId = '00000000-0000-0000-0000-000000000003' }) -Compress)
             }
             if ($args[2] -eq 'federated-credential') {
-                if ($args[3] -eq 'list') { return '0' }
+                if ($args[3] -eq 'list') { return '[]' }
                 $parameterIndex = [Array]::IndexOf($args, '--parameters')
                 $global:NetValueTestCredentialFile = $args[$parameterIndex + 1].Substring(1)
                 if (![IO.Path]::IsPathRooted($global:NetValueTestCredentialFile) -or !(Test-Path -LiteralPath $global:NetValueTestCredentialFile)) { throw 'Native JSON file path is unreadable' }
@@ -62,6 +63,7 @@ try {
     $rejected = $false
     try { & $bootstrap | Out-Null } catch { $rejected = $_.Exception.Message -like '*exit 9*' }
     if (!$rejected) { throw 'Azure CLI failure was ignored' }
+    $global:LASTEXITCODE = 0
     Write-Output 'PowerShell native JSON, existing identity reuse, permission retry, tenant guard, cleanup, and CLI failure checks passed.'
 } finally {
     Remove-Item Function:\az -ErrorAction SilentlyContinue

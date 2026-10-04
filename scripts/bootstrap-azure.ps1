@@ -51,18 +51,21 @@ if (!$containerReady) { throw 'State-container access is not ready. Rerun after 
 
 Write-Output 'Ensuring the GitHub deployment identity and federated credential...'
 $identityName = "NetValue GitHub deployment $nameSuffix"
-$appCount = [int](Invoke-NetValueAzure -Arguments @('ad', 'app', 'list', '--display-name', $identityName, '--query', 'length(@)', '-o', 'tsv'))
+# Avoid shell metacharacters in JMESPath expressions passed through Windows az.cmd.
+$applications = @(Invoke-NetValueAzure -Arguments @('ad', 'app', 'list', '--display-name', $identityName, '--output', 'json') | ConvertFrom-Json | Where-Object { $_.displayName -eq $identityName })
+$appCount = $applications.Count
 if ($appCount -gt 1) { throw 'Duplicate deployment identities; resolve them before continuing.' }
 if ($appCount -eq 0) {
     $clientId = Invoke-NetValueAzure -Arguments @('ad', 'app', 'create', '--display-name', $identityName, '--query', 'appId', '-o', 'tsv')
 } else {
-    $clientId = Invoke-NetValueAzure -Arguments @('ad', 'app', 'list', '--display-name', $identityName, '--query', '[0].appId', '-o', 'tsv')
+    $clientId = $applications[0].appId
 }
 $principalId = Invoke-NetValueAzure -Arguments @('ad', 'sp', 'show', '--id', $clientId, '--query', 'id', '-o', 'tsv') -AllowFailure
 if (!$principalId) {
     $principalId = Invoke-NetValueAzure -Arguments @('ad', 'sp', 'create', '--id', $clientId, '--query', 'id', '-o', 'tsv')
 }
-$credentialCount = [int](Invoke-NetValueAzure -Arguments @('ad', 'app', 'federated-credential', 'list', '--id', $clientId, '--query', "length([?name=='github-production'])", '-o', 'tsv'))
+$federatedCredentials = @(Invoke-NetValueAzure -Arguments @('ad', 'app', 'federated-credential', 'list', '--id', $clientId, '--output', 'json') | ConvertFrom-Json | Where-Object { $_.name -eq 'github-production' })
+$credentialCount = $federatedCredentials.Count
 if ($credentialCount -eq 0) {
     # PowerShell and az use the same native filesystem path; no Bash /tmp translation.
     $credentialFile = [IO.Path]::GetTempFileName()
