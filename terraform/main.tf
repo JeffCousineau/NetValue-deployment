@@ -28,7 +28,6 @@ resource "azurerm_linux_web_app" "netvalue" {
     ftps_state              = "Disabled"
     minimum_tls_version     = "1.2"
     scm_minimum_tls_version = "1.2"
-    app_command_line        = "dotnet /home/site/wwwroot/NetValue.dll"
     application_stack { dotnet_version = "10.0" }
   }
   app_settings = {

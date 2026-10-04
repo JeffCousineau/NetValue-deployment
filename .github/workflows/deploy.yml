@@ -76,6 +76,14 @@ jobs:
           trap 'rm -f "$secret_file"' EXIT
           SECRET_FILE="$secret_file" python3 -c 'import os,json; open(os.environ["SECRET_FILE"],"w").write(json.dumps({"Authentication__ClientSecret":os.environ["ENTRA_CLIENT_SECRET"]}))'
           az webapp config appsettings set --resource-group rg-netvalue-free --name "$APP_NAME" --settings "@$secret_file" --output none
+      - name: Start App Service and check availability
+        run: |
+          az webapp start --resource-group rg-netvalue-free --name "$APP_NAME" --output none
+          state=$(az webapp show --resource-group rg-netvalue-free --name "$APP_NAME" --query state --output tsv)
+          if [ "$state" != 'Running' ]; then
+            echo "App Service is $state. Check F1 quotas and retry after reset; do not upgrade to a paid tier."
+            exit 1
+          fi
       - name: Deploy tested package
         uses: azure/webapps-deploy@v3
         with:

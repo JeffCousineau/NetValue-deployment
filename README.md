@@ -90,4 +90,6 @@ Run **Deploy NetValue**, preferably choosing the reviewed application commit SHA
 
 Open the HTTPS app URL and sign in as the configured owner. For your current single-household setup, download a financial backup from the local app and restore it in Azure through Settings; Azure bootstrap creates your owner membership, and restore preserves it. Existing local JSON/SQLite files remain private and are never deployed. If moving multiple household identities later, use the offline operator import from the application database documentation **before first sign-in**, into an empty schema.
 
+The app uses the .NET runtime's startup detection so initial provisioning does not try to launch a DLL before deployment. The deploy workflow starts a stopped app before uploading the package and stops on unavailable/free-quota states. If Azure reports `QuotaExceeded`, inspect App Service plan → Quotas and wait for the indicated reset; keep F1. Worker stop/restart requests also have an hourly quota, so avoid repeated failed-start or deployment attempts.
+
 Verify account balances, monthly progress, export, sign-out/sign-in, and recovery backups. SQL idle resumption and free App Service startup can be slow. Free quota exhaustion causes downtime instead of SQL overage charges. No live Azure deployment or free-tier capacity check has been performed merely by writing these files.
