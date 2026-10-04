@@ -98,4 +98,3 @@ resource "azuread_application_api_access" "signin_graph" {
   api_client_id  = "00000003-0000-0000-c000-000000000000"
   scope_ids      = ["e1fe6dd8-ba31-4d61-89e7-88639da4683d"] # Existing delegated User.Read permission.
 }
-
