@@ -60,3 +60,13 @@ jobs:
       - name: Show installation details
         if: inputs.operation == 'apply'
         run: terraform output
+      - name: Initialize app SQL access state
+        working-directory: app-access
+        run: terraform init -backend-config=backend.example.hcl -backend-config='use_oidc=true'
+      - name: Review app SQL access
+        working-directory: app-access
+        run: terraform plan -out=reviewed.tfplan
+      - name: Apply app SQL access
+        if: inputs.operation == 'apply'
+        working-directory: app-access
+        run: terraform apply reviewed.tfplan

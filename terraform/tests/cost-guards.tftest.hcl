@@ -1,3 +1,7 @@
+override_data {
+  target = data.terraform_remote_state.foundation
+  values = { outputs = { signin_client_id = "test-client", signin_client_secret = "test-secret" } }
+}
 mock_provider "azurerm" {
   mock_data "azurerm_resource_group" {
     defaults = {

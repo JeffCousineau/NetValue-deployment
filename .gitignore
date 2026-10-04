@@ -19,3 +19,4 @@ terraform.rc
 *.p12
 
 backend.hcl
+migration-imports.tf
