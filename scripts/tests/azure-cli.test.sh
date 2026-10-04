@@ -2,7 +2,7 @@
 set -euo pipefail
 scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fixture=$(mktemp -d)
-trap 'rm -rf "$fixture"' EXIT
+trap 'rm -f "$fixture/az" "$fixture/provider-called" "$fixture/firewall-rules" "$fixture/output"; rmdir "$fixture"' EXIT
 cat > "$fixture/az" <<'MOCK'
 #!/usr/bin/env bash
 for argument in "$@"; do
