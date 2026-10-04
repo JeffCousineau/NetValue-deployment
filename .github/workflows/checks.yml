@@ -1,0 +1,32 @@
+name: Terraform CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: terraform-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    name: Terraform checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.5
+      - name: Format and validate all stacks without cloud credentials
+        run: |
+          for stack in bootstrap foundation terraform app-access runner-access sql-access cost-alerts github-security; do
+            terraform -chdir="$stack" fmt -check
+            terraform -chdir="$stack" init -backend=false -input=false
+            terraform -chdir="$stack" validate
+          done
+      - name: Test free-tier and publishing safeguards
+        run: terraform -chdir=terraform test
+      - name: Test exact-IP firewall safeguards
+        run: |
+          terraform -chdir=app-access test
+          terraform -chdir=runner-access test

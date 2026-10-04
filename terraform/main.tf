@@ -16,11 +16,13 @@ resource "azurerm_service_plan" "free" {
   }
 }
 resource "azurerm_linux_web_app" "netvalue" {
-  name                = local.name
-  resource_group_name = data.azurerm_resource_group.netvalue.name
-  location            = var.location
-  service_plan_id     = azurerm_service_plan.free.id
-  https_only          = true
+  name                                           = local.name
+  resource_group_name                            = data.azurerm_resource_group.netvalue.name
+  location                                       = var.location
+  service_plan_id                                = azurerm_service_plan.free.id
+  https_only                                     = true
+  ftp_publish_basic_authentication_enabled       = false
+  webdeploy_publish_basic_authentication_enabled = false
   identity { type = "SystemAssigned" }
   site_config {
     always_on               = false
