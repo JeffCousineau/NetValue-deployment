@@ -39,8 +39,8 @@ resource "azurerm_role_assignment" "deployment_state" {
 }
 resource "azuread_application_registration" "signin" {
   display_name                   = "NetValue"
-  sign_in_audience               = "AzureADMyOrg"
-  requested_access_token_version = 1
+  sign_in_audience               = "AzureADandPersonalMicrosoftAccount"
+  requested_access_token_version = 2
 }
 resource "azuread_service_principal" "signin" {
   client_id = azuread_application_registration.signin.client_id

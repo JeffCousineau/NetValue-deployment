@@ -78,6 +78,10 @@ terraform '-chdir=cost-alerts' apply reviewed.tfplan
 
 ## GitHub configuration and app deployment
 
+### Microsoft self-service sign-in
+
+The owner-run `foundation` stack configures the sign-in registration for `AzureADandPersonalMicrosoftAccount` and access token version 2. Apply its reviewed plan first, then apply the app stack and deploy the matching NetValue application changes. The app uses `Authentication__SelfServiceEnabled=true` to accept personal and work/school Microsoft accounts and offer household creation to new users. No database schema migration is required for this feature; existing users retain their tenant/Object ID mappings and memberships. Free-tier, SQL auto-pause, firewall, and budget settings remain unchanged. Validate both an existing owner login and a new personal Microsoft account after deployment.
+
 Use the existing `production` environment in `JeffCousineau/NetValue-deployment`, restricted to main. Workflows are manual; pushes and PRs do not deploy. Keep GitHub Actions paid overages disabled.
 
 Set `AZURE_CLIENT_ID` from `terraform -chdir=foundation output -raw deployment_client_id`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TF_STATE_ACCOUNT` from bootstrap, `AZURE_WEB_APP_NAME`, and `SQL_SERVER_NAME` from app outputs. Set `FREE_OFFER_VERIFIED=true` after eligibility review and `SQL_ACCESS_READY=true` after SQL access succeeds. Refresh client IDs in GitHub and local development configuration if rebuilding the Entra registrations generates new IDs. The old GitHub `ENTRA_CLIENT_SECRET` is no longer used; Terraform manages the Azure sign-in credential.
