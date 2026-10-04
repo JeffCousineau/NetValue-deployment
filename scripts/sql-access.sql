@@ -1,7 +1,9 @@
 -- Run in the NetValue database as its configured Entra owner/admin.
--- Replace both GUID placeholders with infrastructure/bootstrap outputs.
-DECLARE @app_id uniqueidentifier = 'REPLACE_WITH_WEB_APP_PRINCIPAL_ID';
-DECLARE @deployment_id uniqueidentifier = 'REPLACE_WITH_DEPLOYMENT_PRINCIPAL_ID';
+-- Use client/application IDs for service principals (including managed identities), not object/principal IDs.
+-- Resolve the app client ID: az ad sp show --id <web_app_principal_id> --query appId -o tsv
+-- Deployment client ID is AZURE_CLIENT_ID from bootstrap.
+DECLARE @app_id uniqueidentifier = 'REPLACE_WITH_WEB_APP_CLIENT_ID';
+DECLARE @deployment_id uniqueidentifier = 'REPLACE_WITH_DEPLOYMENT_CLIENT_ID';
 DECLARE @app_sid varbinary(16) = CONVERT(binary(16), @app_id);
 DECLARE @deployment_sid varbinary(16) = CONVERT(binary(16), @deployment_id);
 IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'NetValue app' AND sid <> @app_sid)
