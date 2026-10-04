@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/azure-cli.sh"
 # Exact App Service outbound IPv4 addresses only. No AllowAzureServices rule.
 app_name=${1:?Supply web app name}
 server_name=${2:?Supply SQL server name}
